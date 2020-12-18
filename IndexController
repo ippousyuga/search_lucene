@@ -1,0 +1,219 @@
+package edu.dlut.searching.controller;
+
+import edu.dlut.searching.model.Answer;
+import edu.dlut.searching.model.Question;
+import edu.dlut.searching.service.AnswerService;
+import edu.dlut.searching.service.QuestionService;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.document.*;
+import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.queryparser.classic.QueryParser;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.highlight.Highlighter;
+import org.apache.lucene.search.highlight.QueryScorer;
+import org.apache.lucene.search.highlight.SimpleHTMLFormatter;
+import org.apache.lucene.store.FSDirectory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.wltea.analyzer.lucene.IKAnalyzer;
+
+import java.io.IOException;
+import java.io.StringReader;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+
+@RestController
+public class IndexController {
+    @Autowired
+    private QuestionService questionService;
+    private AnswerService answerService;
+
+    private String IDX_ANSWER = "D:\\workspace\\idea\\searching-main\\src\\main\\java\\edu\\dlut\\searching\\lucene\\index\\answer";
+    private String IDX_QUESTION = "D:\\workspace\\idea\\searching-main\\src\\main\\java\\edu\\dlut\\searching\\lucene\\index\\question";
+
+    public IndexController(AnswerService answerService) {
+        this.answerService = answerService;
+    }
+
+
+    @GetMapping("/createAnswerIndex")
+    public void createAnswerIndex(){
+        List<Answer> answers = answerService.queryAnswers(0,20000);
+
+        FSDirectory directory = null;
+        try {
+            directory = FSDirectory.open(Paths.get(IDX_ANSWER));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        IKAnalyzer analyzer = new IKAnalyzer(true);
+        IndexWriterConfig writerConfig = new IndexWriterConfig(analyzer);
+        writerConfig.setOpenMode(IndexWriterConfig.OpenMode.CREATE);    //每次索引删除之前的
+        IndexWriter writer = null;
+        try {
+            writer = new IndexWriter(directory,writerConfig);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        for (Answer answer : answers){
+            Long answerId = answer.getAnswerId();
+            //System.out.println(answerId);
+            String content = answer.getContent();
+            //System.out.println(content);
+            Document document = new Document();
+            document.add(new LongPoint("answerId",answerId));
+            document.add(new StoredField("answerId",answerId));  //默认不支持存储
+            document.add(new TextField("answer",content, Field.Store.YES));
+            try {
+                writer.addDocument(document);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        System.out.println("本次共索引"+writer.numDocs()+"条");
+        try {
+            writer.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        try {
+            directory.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+    /**
+     * 根据输入内容查找回答并返回高亮摘要
+     * */
+    @GetMapping("/answerSearch")
+    public List<Answer> answerSearch()throws Exception{
+        IKAnalyzer ikAnalyzer = new IKAnalyzer(true);
+        FSDirectory directory = FSDirectory.open(Paths.get(IDX_ANSWER));
+        IndexReader indexReader = DirectoryReader.open(directory);
+        IndexSearcher searcher = new IndexSearcher(indexReader);
+        String filedName = "answer";
+        QueryParser queryParser = new QueryParser(filedName, ikAnalyzer);
+        String keyword = "苹果和三星";
+        Query query = queryParser.parse(keyword);
+        TopDocs docs = searcher.search(query, 5000);    //n：搜索到的上限是n条
+        System.out.println(docs.totalHits);
+        SimpleHTMLFormatter simpleHTMLFormatter = new SimpleHTMLFormatter(
+                "<span style='color:red'>", "</span>");
+        Highlighter highlighter = new Highlighter(simpleHTMLFormatter, new QueryScorer(query));
+        List<Answer> answersearch = new ArrayList<>();
+        for (ScoreDoc sdoc :docs.scoreDocs){
+            int docId = sdoc.doc;
+            Document hitDoc = searcher.doc(sdoc.doc);
+            Long answerId = Long.valueOf(hitDoc.get("answerId"));
+            TokenStream tokenStream = ikAnalyzer.tokenStream(filedName, new StringReader(hitDoc.get(filedName)));
+            String bestFragment = highlighter.getBestFragment(tokenStream, hitDoc.get(filedName));
+            System.out.println("LuceneId:" + docId + "\tanswerId:" + answerId + "\tanswer:" + bestFragment);
+            Answer answer = new Answer();
+            answer.setContent(bestFragment);
+            answer.setAnswerId(answerId);
+            answersearch.add(answer);
+        }
+        //System.out.println(answersearch.get(0));
+        indexReader.close();
+        directory.close();
+        return answersearch;
+    }
+
+    @GetMapping("/createQuestionIndex")
+    public void createQuestionIndex(){
+        List<Question> questions = questionService.queryQuestions(0, 20000);
+        //Question question=questions.get(0);
+        //String string= JSON.toJSONString(question);
+        //System.out.println(string);
+        //question=JSON.parseObject(string,Question.class);
+
+        FSDirectory directory = null;
+        try {
+            directory = FSDirectory.open(Paths.get(IDX_QUESTION));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        IKAnalyzer analyzer = new IKAnalyzer(true);
+        IndexWriterConfig writerConfig = new IndexWriterConfig(analyzer);
+        writerConfig.setOpenMode(IndexWriterConfig.OpenMode.CREATE);    //每次索引删除之前的
+        IndexWriter writer = null;
+        try {
+            writer = new IndexWriter(directory,writerConfig);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        for (Question content : questions){
+            Long questionId = content.getQuestionId();
+            //System.out.println(questionId);
+            String title = content.getTitle();
+            //System.out.println(title);
+            Document document = new Document();
+            document.add(new LongPoint("questionId",questionId));
+            document.add(new StoredField("questionId",questionId));  //默认不支持存储
+            document.add(new TextField("question",title, Field.Store.YES));
+            try {
+                writer.addDocument(document);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        System.out.println("本次共索引"+writer.numDocs()+"条");
+        try {
+            writer.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        try {
+            directory.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @GetMapping("/questionSearch")
+    /**
+     * 回答的最佳摘要并高亮
+     */
+    public List<Question> questionSearch()throws Exception{
+        IKAnalyzer ikAnalyzer = new IKAnalyzer(true);
+        FSDirectory directory = FSDirectory.open(Paths.get(IDX_QUESTION));
+        IndexReader indexReader = DirectoryReader.open(directory);
+        IndexSearcher searcher = new IndexSearcher(indexReader);
+        String filedName = "question";
+        QueryParser queryParser = new QueryParser(filedName, ikAnalyzer);
+        String keyword = "苹果和三星";
+        Query query = queryParser.parse(keyword);
+        TopDocs docs = searcher.search(query, 1000);    //n：搜索到的上限是n条
+        System.out.println(docs.totalHits);
+        SimpleHTMLFormatter simpleHTMLFormatter = new SimpleHTMLFormatter(
+                "<span style='color:red'>", "</span>");
+        Highlighter highlighter = new Highlighter(simpleHTMLFormatter, new QueryScorer(query));
+        List<Question> questionsearch = new ArrayList<>();
+        for (ScoreDoc sdoc :docs.scoreDocs){
+            int docId = sdoc.doc;
+            Document hitDoc = searcher.doc(sdoc.doc);
+            Long questionId = Long.valueOf(hitDoc.get("questionId"));
+            TokenStream tokenStream = ikAnalyzer.tokenStream(filedName, new StringReader(hitDoc.get(filedName)));
+            String bestFragment = highlighter.getBestFragment(tokenStream, hitDoc.get(filedName));
+            System.out.println("LuceneId:" + docId + "\tquestionId:" + questionId + "\tquestion:" + bestFragment);
+            Question question = new Question();
+            question.setTitle(bestFragment);
+            question.setQuestionId(questionId);
+            questionsearch.add(question);
+        }
+        //System.out.println(questionsearch.get(0));
+        indexReader.close();
+        directory.close();
+        return questionsearch;
+    }
+}
