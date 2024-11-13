@@ -60,46 +60,29 @@ public class IndexServiceImpl implements IndexService {
         //question=JSON.parseObject(string,Question.class);
 
         FSDirectory directory = null;
-        try {
-            directory = FSDirectory.open(Paths.get(IDX_QUESTION));  // 获取索引路径
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        
+        directory = FSDirectory.open(Paths.get(IDX_QUESTION));  // 获取索引路径
         IKAnalyzer analyzer = new IKAnalyzer(true);     // 创建分词器
         IndexWriterConfig writerConfig = new IndexWriterConfig(analyzer);   // 把分词器加入索引设置
         writerConfig.setOpenMode(IndexWriterConfig.OpenMode.CREATE);    // 开始新索引时删除之前创建的索引
-        IndexWriter writer = null;      // 创建indexwriter用来写索引
-        try {
-            writer = new IndexWriter(directory,writerConfig);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        for (Question content : questions){
-            Long questionId = content.getQuestionId();
-            //System.out.println(questionId);
-            String title = content.getTitle();
-            //System.out.println(title);
-            Document document = new Document();     // document是一条记录，包含多个field
-            document.add(new LongPoint("questionId",questionId));    // int,long,float 这些number是不支持分词的,默认就不支持存储
-            document.add(new StoredField("questionId",questionId));  // Long类型Field默认不支持存储，需用storeField
-            document.add(new TextField("question",title, Field.Store.YES)); // textfield：会分词，lucene倒排索引
-            try {
+        // 创建indexwriter用来写索引
+        try(IndexWriter writer = new IndexWriter(directory,writerConfig)) {
+            for (Question content : questions){
+                Long questionId = content.getQuestionId();
+                //System.out.println(questionId);
+                String title = content.getTitle();
+                //System.out.println(title);
+                Document document = new Document();     // document是一条记录，包含多个field
+                document.add(new LongPoint("questionId",questionId));    // int,long,float 这些number是不支持分词的,默认就不支持存储
+                document.add(new StoredField("questionId",questionId));  // Long类型Field默认不支持存储，需用storeField
+                document.add(new TextField("question",title, Field.Store.YES)); // textfield：会分词，lucene倒排索引
                 writer.addDocument(document);
-            } catch (IOException e) {
-                e.printStackTrace();
+                System.out.println("本次共索引"+writer.numDocs()+"条");
             }
-        }
-        System.out.println("本次共索引"+writer.numDocs()+"条");
-        try {
-            writer.close();
         } catch (IOException e) {
             e.printStackTrace();
-        }
-        try {
+        } finally {
             directory.close();
-        } catch (IOException e) {
-            e.printStackTrace();
         }
         return true;
     }
